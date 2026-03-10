@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* makes the line under home and all in navigation bar visible */
+a.active hr{
+    display: block;
+}
+
