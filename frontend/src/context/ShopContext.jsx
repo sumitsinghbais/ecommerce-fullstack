@@ -13,16 +13,16 @@ const ShopContextProvider = (props) => {
   const [showSearch, setShowSearch] = useState(true);
 
   const [cartItems, setCartItems] = useState({});
-
-  //  ADD TO CART
-  const addToCart = async (itemId, size) => {
+  
+  // ✅ ADD TO CART
+  const addToCart = (itemId, size) => {
 
     if (!size) {
       toast.error("Select Product Size");
       return;
     }
 
-    let cartData = JSON.parse(JSON.stringify(cartItems));
+    let cartData = structuredClone(cartItems);
 
     if (cartData[itemId]) {
 
@@ -44,13 +44,18 @@ const ShopContextProvider = (props) => {
   // ✅ REMOVE FROM CART
   const removeFromCart = (itemId, size) => {
 
-    let cartData = JSON.parse(JSON.stringify(cartItems));
+    let cartData = structuredClone(cartItems);
 
-    if (cartData[itemId][size]) {
+    if (cartData[itemId]?.[size]) {
       cartData[itemId][size] -= 1;
 
       if (cartData[itemId][size] === 0) {
         delete cartData[itemId][size];
+      }
+
+      // Optional: remove product if no sizes left
+      if (Object.keys(cartData[itemId]).length === 0) {
+        delete cartData[itemId];
       }
     }
 
@@ -59,41 +64,40 @@ const ShopContextProvider = (props) => {
 
 
   // ✅ GET TOTAL CART ITEMS COUNT
-const getCartCount = () => {
-  let totalCount = 0;
+  const getCartCount = () => {
+    let totalCount = 0;
 
-  for (const item in cartItems) {
-    for (const size in cartItems[item]) {
-      totalCount += cartItems[item][size];
+    for (const itemId in cartItems) {
+      for (const size in cartItems[itemId]) {
+        totalCount += cartItems[itemId][size];
+      }
     }
-  }
 
-  return totalCount;
-};
+    return totalCount;
+  };
 
 
   // ✅ GET TOTAL CART AMOUNT
   const getCartAmount = () => {
+    let totalAmount = 0;
 
-    let total = 0;
+    for (const itemId in cartItems) {
 
-    for (const item in cartItems) {
+      const itemInfo = products.find(p => p._id === itemId);
+      if (!itemInfo) continue;
 
-      const product = products.find((p) => p._id === item);
-
-      for (const size in cartItems[item]) {
-        total += product.price * cartItems[item][size];
+      for (const size in cartItems[itemId]) {
+        totalAmount += itemInfo.price * cartItems[itemId][size];
       }
-
     }
 
-    return total;
+    return totalAmount;
   };
 
 
-  // (Optional Debug)
+  // 🔍 DEBUG (optional)
   useEffect(() => {
-    console.log(cartItems);
+    console.log("Cart Items:", cartItems);
   }, [cartItems]);
 
 
@@ -109,7 +113,8 @@ const getCartCount = () => {
     addToCart,
     removeFromCart,
     getCartCount,
-    getCartAmount
+    getCartAmount,
+  
   };
 
   return (
