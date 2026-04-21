@@ -1,5 +1,7 @@
 import React from "react";
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
+import { ShopContext } from "./context/ShopContext";
+import { useContext, useEffect } from "react";
 
 import Home from "./pages/Home";
 import Collection from "./pages/Collection";
@@ -10,6 +12,7 @@ import Cart from "./pages/Cart";
 import Login from "./pages/Login";
 import Orders from "./pages/Order";
 import PlaceOrder from "./pages/PlaceOrder";
+import AdminPanel from "./pages/AdminPanel";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import SearchBar from "./components/SearchBar";
@@ -17,10 +20,19 @@ import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
 const App = () => {
+  const { token } = useContext(ShopContext);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (!token && location.pathname !== '/login') {
+      navigate('/login');
+    }
+  }, [token, location.pathname, navigate]);
   return (
     <div className="px-4 sm:px-[5vw] md:px-[7vw] lg:px-[9vw]">
       <ToastContainer />
-      <Navbar />
+      {token && <Navbar />}
       <SearchBar />
       <Routes>
         <Route path="/" element={<Home />} />
@@ -32,6 +44,7 @@ const App = () => {
         <Route path="/login" element={<Login />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/place-order" element={<PlaceOrder />} />
+        <Route path="/admin" element={<AdminPanel />} />
       </Routes>
       <Footer />
     </div>

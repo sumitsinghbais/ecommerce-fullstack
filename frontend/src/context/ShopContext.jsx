@@ -13,6 +13,7 @@ const ShopContextProvider = (props) => {
   const [showSearch, setShowSearch] = useState(true);
 
   const [cartItems, setCartItems] = useState({});
+  const [token, setToken] = useState(localStorage.getItem("token") || "");
   
   // ✅ ADD TO CART
   const addToCart = (itemId, size) => {
@@ -114,7 +115,8 @@ const ShopContextProvider = (props) => {
     removeFromCart,
     getCartCount,
     getCartAmount,
-  
+    token,
+    setToken
   };
 
   return (
