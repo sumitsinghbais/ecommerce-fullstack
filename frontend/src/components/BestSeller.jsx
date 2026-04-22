@@ -8,11 +8,19 @@ const BestSeller = () => {
   const { products } = useContext(ShopContext)
   const [bestSeller, setBestSeller] = useState([])
 
-  // Filter bestseller products
+  // Filter bestseller products (fallback to latest 5 if no bestseller flag)
   useEffect(() => {
-    const bestProduct = products.filter((item) => item.bestseller)
-    setBestSeller(bestProduct.slice(0,5))
-  }, [])
+    if (products.length > 0) {
+      const bestProduct = products.filter((item) => item.bestseller)
+      if (bestProduct.length > 0) {
+        setBestSeller(bestProduct.slice(0,5))
+      } else {
+        // Fallback: show highest-rated or most recent products
+        const sorted = [...products].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+        setBestSeller(sorted.slice(0,5))
+      }
+    }
+  }, [products])
 
   return (
     <div className='my-10'>
@@ -33,8 +41,9 @@ const BestSeller = () => {
                 key={index}
                 id={item._id}
                 name={item.name}
-                image={item.image}
+                image={item.image || item.imageUrl}
                 price={item.price}
+                category={item.category}
             />
             ))
         }

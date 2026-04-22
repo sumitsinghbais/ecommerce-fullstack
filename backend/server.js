@@ -15,6 +15,7 @@ const cartRoutes = require('./routes/cartRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
+const adminRoutes = require('./routes/admin/adminRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 // Load env vars
@@ -54,6 +55,7 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Base route
 app.get('/', (req, res) => {

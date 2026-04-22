@@ -1,5 +1,5 @@
 import { createContext, useState, useEffect } from "react";
-import { products } from "../assets/assets";
+import axios from "axios";
 import { toast } from "react-toastify";
 
 export const ShopContext = createContext();
@@ -8,12 +8,33 @@ const ShopContextProvider = (props) => {
 
   const currency = "$";
   const delivery_fee = 10;
+  const baseURL = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
+  const [products, setProducts] = useState([]);
   const [search, setSearch] = useState("");
   const [showSearch, setShowSearch] = useState(true);
 
-  const [cartItems, setCartItems] = useState({});
+  const fetchProducts = async () => {
+    try {
+      const { data } = await axios.get(`${baseURL}/api/products?limit=0`);
+      setProducts(data.products || data);
+    } catch (error) {
+      console.error("Error fetching products:", error);
+      toast.error("Failed to load products");
+    }
+  };
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  const [cartItems, setCartItems] = useState(JSON.parse(localStorage.getItem("cartItems")) || {});
   const [token, setToken] = useState(localStorage.getItem("token") || "");
+  
+  // Persist cart to localStorage
+  useEffect(() => {
+    localStorage.setItem("cartItems", JSON.stringify(cartItems));
+  }, [cartItems]);
   
   // ✅ ADD TO CART
   const addToCart = (itemId, size) => {
@@ -39,6 +60,7 @@ const ShopContextProvider = (props) => {
     }
 
     setCartItems(cartData);
+    toast.success("Added to cart!", { toastId: 'add-cart-toast' });
   };
 
 
@@ -111,6 +133,7 @@ const ShopContextProvider = (props) => {
     showSearch,
     setShowSearch,
     cartItems,
+    setCartItems,
     addToCart,
     removeFromCart,
     getCartCount,

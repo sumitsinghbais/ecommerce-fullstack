@@ -53,12 +53,20 @@ const Cart = () => {
               (product) => product._id === item._id
             );
 
+            if (!productData) return null;
+
+            const getImageSrc = () => {
+              if (productData.imageUrl) return productData.imageUrl;
+              if (productData.image && Array.isArray(productData.image) && productData.image.length > 0) return productData.image[0];
+              return "https://via.placeholder.com/150";
+            }
+
             return (
               <div key={index} className="py-4 border-t border-b text-gray-700 grid grid-cols-[4fr_2fr_0.5fr] items-center gap-4">
 
                 {/* Product Info */}
                 <div className="flex items-start gap-6">
-                  <img className="w-16 sm:w-20" src={productData.image[0]} alt="" />
+                  <img className="w-16 sm:w-20" src={getImageSrc()} alt="" />
 
                   <div>
                     <p className="text-xs sm:text-lg font-medium">
@@ -76,6 +84,7 @@ const Cart = () => {
 
                 {/* Quantity */}
                 <input
+                  onChange={(e) => e.target.value === '' || e.target.value === '0' ? null : addToCart(item._id, item.size)}
                   className="border max-w-10 sm:max-w-20 px-1 sm:px-2 py-1"
                   type="number"
                   min={1}
@@ -89,14 +98,6 @@ const Cart = () => {
                   alt="delete"
                   className="w-4 sm:w-5 cursor-pointer"
                 />
-
-
-                {/* <button
-                  onClick={() => removeFromCart(item._id, item.size)}
-                  className="text-red-500 text-sm"
-                >
-                  Remove
-                </button> */}
 
               </div>
             );

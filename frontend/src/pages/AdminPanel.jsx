@@ -179,7 +179,7 @@ const AdminPanel = () => {
                   <tr key={product._id} className="bg-white border-b hover:bg-gray-50/50 transition">
                     <td className="px-6 py-4 font-medium text-gray-900 whitespace-nowrap flex items-center gap-3">
                       <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center overflow-hidden">
-                        {product.imageUrl ? <img src={`${baseURL}${product.imageUrl}`} className="object-cover w-full h-full" alt="" /> : "🛒"}
+                        {product.imageUrl ? <img src={product.imageUrl.startsWith('http') ? product.imageUrl : `${baseURL}${product.imageUrl}`} className="object-cover w-full h-full" alt="" /> : "🛒"}
                       </div>
                       {product.name}
                     </td>

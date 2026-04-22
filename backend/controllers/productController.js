@@ -5,7 +5,7 @@ const Product = require('../models/Product');
 // @access  Public
 const getProducts = async (req, res) => {
   try {
-    const pageSize = Number(req.query.limit) || 10;
+    const pageSize = req.query.limit === '0' ? 0 : (Number(req.query.limit) || 200);
     const page = Number(req.query.page) || 1;
 
     const keyword = req.query.keyword
@@ -27,9 +27,12 @@ const getProducts = async (req, res) => {
     const filterObj = { ...keyword, ...categoryFilter, ...priceFilter };
 
     const count = await Product.countDocuments(filterObj);
-    const products = await Product.find(filterObj)
-      .limit(pageSize)
-      .skip(pageSize * (page - 1));
+    
+    // If pageSize is 0, return ALL products (no pagination)
+    const query = Product.find(filterObj).sort({ createdAt: -1 });
+    const products = pageSize === 0 
+      ? await query 
+      : await query.limit(pageSize).skip(pageSize * (page - 1));
 
     res.json({
       products,
@@ -68,7 +71,7 @@ const createProduct = async (req, res) => {
     let imageUrl = '';
     
     if (req.file) {
-      imageUrl = `/uploads/${req.file.filename}`;
+      imageUrl = req.file.path;
     }
 
     const product = new Product({
@@ -104,7 +107,7 @@ const updateProduct = async (req, res) => {
       product.stock = stock || product.stock;
       
       if (req.file) {
-        product.imageUrl = `/uploads/${req.file.filename}`;
+        product.imageUrl = req.file.path;
       }
 
       const updatedProduct = await product.save();

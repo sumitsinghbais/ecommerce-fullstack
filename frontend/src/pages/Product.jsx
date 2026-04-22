@@ -19,7 +19,9 @@ const Product = () => {
 
       if (item._id === productId) {
         setProductData(item);
-        setImage(item.image[0]);
+        // Handle both image array (static assets) and imageUrl string (backend/Cloudinary)
+        const images = item.image || (item.imageUrl ? [item.imageUrl] : []);
+        setImage(Array.isArray(images) ? images[0] : images);
         return null;
       }
 
@@ -43,7 +45,7 @@ const Product = () => {
           <div className="flex sm:flex-col overflow-x-auto sm:overflow-y-scroll justify-between sm:justify-normal sm:w-[18.7%] w-full">
 
             {
-              productData.image.map((item, index) => (
+              (productData.image || (productData.imageUrl ? [productData.imageUrl] : [])).map((item, index) => (
                 <img
                   onClick={() => setImage(item)}
                   src={item}
@@ -99,7 +101,7 @@ const Product = () => {
             <div className="flex gap-2">
 
               {
-                productData.sizes.map((item, index) => (
+                (productData.sizes || ["S", "M", "L", "XL"]).map((item, index) => (
 
                   <button
                     onClick={() => setSize(item)}
