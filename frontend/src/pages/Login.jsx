@@ -304,21 +304,6 @@ const Login = () => {
                 >
                   {loading ? "Processing..." : (currentState === "Login" ? "Sign In" : "Sign Up")}
                 </button>
-
-                <div className="relative flex items-center justify-center my-4">
-                  <hr className="w-full border-gray-200" />
-                  <span className="absolute bg-white px-3 text-xs text-gray-400">or</span>
-                </div>
-
-                <div className="flex justify-center">
-                  <GoogleLogin
-                    onSuccess={handleGoogleSuccess}
-                    onError={() => toast.error("Google Login failed")}
-                    useOneTap
-                    theme="outline"
-                    shape="rectangular"
-                  />
-                </div>
               </form>
             )}
           </div>

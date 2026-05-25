@@ -13,14 +13,21 @@ const ShopContextProvider = (props) => {
   const [products, setProducts] = useState([]);
   const [search, setSearch] = useState("");
   const [showSearch, setShowSearch] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const fetchProducts = async () => {
     try {
+      setLoading(true);
+      setError(null);
       const { data } = await axios.get(`${baseURL}/api/products?limit=0`);
       setProducts(data.products || data);
     } catch (error) {
       console.error("Error fetching products:", error);
+      setError("Failed to load products");
       toast.error("Failed to load products");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -86,6 +93,28 @@ const ShopContextProvider = (props) => {
   };
 
 
+  // ✅ UPDATE QUANTITY
+  const updateQuantity = (itemId, size, quantity) => {
+    let cartData = structuredClone(cartItems);
+
+    if (quantity === 0) {
+        if (cartData[itemId]) {
+            delete cartData[itemId][size];
+            if (Object.keys(cartData[itemId]).length === 0) {
+                delete cartData[itemId];
+            }
+        }
+    } else {
+        if (!cartData[itemId]) {
+            cartData[itemId] = {};
+        }
+        cartData[itemId][size] = quantity;
+    }
+
+    setCartItems(cartData);
+  };
+
+
   // ✅ GET TOTAL CART ITEMS COUNT
   const getCartCount = () => {
     let totalCount = 0;
@@ -136,10 +165,13 @@ const ShopContextProvider = (props) => {
     setCartItems,
     addToCart,
     removeFromCart,
+    updateQuantity,
     getCartCount,
     getCartAmount,
     token,
-    setToken
+    setToken,
+    loading,
+    error
   };
 
   return (

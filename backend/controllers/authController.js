@@ -6,9 +6,10 @@ const nodemailer = require('nodemailer');
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// ── Email Transporter ──
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // Use STARTTLS
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
@@ -34,8 +35,6 @@ const generateToken = (id) => {
 // @route   POST /api/auth/register
 // @access  Public
 const registerUser = async (req, res) => {
-  console.log("API HIT: /api/auth/register");
-  console.log("Request Body:", req.body);
   try {
     const { name, email, password } = req.body;
 
@@ -72,8 +71,6 @@ const registerUser = async (req, res) => {
 // @route   POST /api/auth/login
 // @access  Public
 const loginUser = async (req, res) => {
-  console.log("API HIT: /api/auth/login");
-  console.log("Request Body:", req.body);
   try {
     const { email, password } = req.body;
 
@@ -92,7 +89,7 @@ const loginUser = async (req, res) => {
         token: generateToken(user._id),
       });
     } else {
-      res.status(401).json({ message: 'Invalid email or password' });
+      res.status(400).json({ message: 'Invalid email or password' });
     }
   } catch (error) {
     console.error("Login Error:", error);
@@ -104,7 +101,6 @@ const loginUser = async (req, res) => {
 // @route   POST /api/auth/google
 // @access  Public
 const googleLogin = async (req, res) => {
-  console.log("API HIT: /api/auth/google");
   try {
     const { credential } = req.body;
     

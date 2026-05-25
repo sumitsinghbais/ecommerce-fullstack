@@ -9,6 +9,7 @@ const {
   createProductReview,
   deleteProductReview,
   bulkUploadProducts,
+  deleteProductsBulk,
 } = require('../controllers/productController');
 const { protect, admin } = require('../middleware/authMiddleware');
 const upload = require('../middleware/uploadMiddleware');
@@ -17,7 +18,9 @@ router.route('/')
   .get(getProducts)
   .post(protect, admin, upload.single('image'), createProduct);
 
-router.post('/bulk', protect, admin, bulkUploadProducts);
+router.route('/bulk')
+  .post(protect, admin, bulkUploadProducts)
+  .delete(protect, admin, deleteProductsBulk);
 
 router.route('/:id')
   .get(getProductById)

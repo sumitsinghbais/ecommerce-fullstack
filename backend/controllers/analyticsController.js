@@ -12,7 +12,7 @@ const getAnalytics = async (req, res) => {
     const totalOrders = await Order.countDocuments({});
     
     const revenuePipeline = await Order.aggregate([
-      { $match: { isPaid: true } },
+      { $match: { $or: [{ isPaid: true }, { status: 'Delivered' }] } },
       { $group: { _id: null, totalRevenue: { $sum: '$totalPrice' } } }
     ]);
     
@@ -20,10 +20,10 @@ const getAnalytics = async (req, res) => {
 
     // Monthly sales data
     const monthlySales = await Order.aggregate([
-      { $match: { isPaid: true } },
+      { $match: { $or: [{ isPaid: true }, { status: 'Delivered' }] } },
       {
         $group: {
-          _id: { $month: "$paidAt" },
+          _id: { $month: { $ifNull: ["$paidAt", "$createdAt"] } },
           revenue: { $sum: "$totalPrice" },
           count: { $sum: 1 }
         }

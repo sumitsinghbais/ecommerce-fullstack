@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+backend/coverage/
+backend/.env
+backend/.env.test

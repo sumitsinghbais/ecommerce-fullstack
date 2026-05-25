@@ -16,6 +16,7 @@ const orderRoutes = require('./routes/orderRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const adminRoutes = require('./routes/admin/adminRoutes');
+const couponRoutes = require('./routes/couponRoutes');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
 // Load env vars
@@ -27,14 +28,38 @@ const app = express();
 
 // Security Middleware
 app.use(helmet());
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  'http://localhost:80',
+  'http://localhost:3000'
+];
+app.use(cors({ 
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true 
+}));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: { message: 'Too many requests, please try again later.' }
 });
-app.use('/api/', limiter);
+
+// Enable rate limiting in production, or if ENABLE_RATE_LIMIT is true (for testing)
+const isTest = process.env.NODE_ENV === 'test';
+const enableRateLimit = process.env.ENABLE_RATE_LIMIT === 'true';
+
+if (!isTest || enableRateLimit) {
+  app.use(limiter);
+}
 
 // Logging middleware
 if (process.env.NODE_ENV === 'development') {
@@ -56,10 +81,16 @@ app.use('/api/orders', orderRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/coupons', couponRoutes);
 
 // Base route
 app.get('/', (req, res) => {
   res.send('Ecommerce API is running...');
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'OK', uptime: process.uptime() });
 });
 
 // Error Handling Middleware
@@ -81,4 +112,9 @@ const startServer = async () => {
   }
 };
 
-startServer();
+// Only start the server if this file is run directly (not imported by tests)
+if (require.main === module) {
+  startServer();
+}
+
+module.exports = app;

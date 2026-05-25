@@ -20,9 +20,9 @@ const getProducts = async (req, res) => {
     const categoryFilter = req.query.category ? { category: req.query.category } : {};
     
     // Price range filter
-    const minPrice = req.query.minPrice ? Number(req.query.minPrice) : 0;
-    const maxPrice = req.query.maxPrice ? Number(req.query.maxPrice) : Infinity;
-    const priceFilter = { price: { $gte: minPrice, $lte: maxPrice } };
+    const priceFilter = {};
+    if (req.query.minPrice) priceFilter.price = { ...priceFilter.price, $gte: Number(req.query.minPrice) };
+    if (req.query.maxPrice) priceFilter.price = { ...priceFilter.price, $lte: Number(req.query.maxPrice) };
 
     const filterObj = { ...keyword, ...categoryFilter, ...priceFilter };
 
@@ -37,7 +37,7 @@ const getProducts = async (req, res) => {
     res.json({
       products,
       page,
-      pages: Math.ceil(count / pageSize),
+      pages: pageSize === 0 ? 1 : Math.ceil(count / pageSize),
       total: count,
     });
   } catch (error) {
@@ -71,7 +71,7 @@ const createProduct = async (req, res) => {
     let imageUrl = '';
     
     if (req.file) {
-      imageUrl = req.file.path;
+      imageUrl = req.file.path.replace(/\\/g, '/');
     }
 
     const product = new Product({
@@ -107,7 +107,7 @@ const updateProduct = async (req, res) => {
       product.stock = stock || product.stock;
       
       if (req.file) {
-        product.imageUrl = req.file.path;
+        product.imageUrl = req.file.path.replace(/\\/g, '/');
       }
 
       const updatedProduct = await product.save();
@@ -229,6 +229,23 @@ const bulkUploadProducts = async (req, res) => {
   }
 };
 
+// @desc    Bulk delete products
+// @route   DELETE /api/products/bulk
+// @access  Private/Admin
+const deleteProductsBulk = async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ message: 'No product IDs provided' });
+    }
+
+    const result = await Product.deleteMany({ _id: { $in: ids } });
+    res.json({ message: `${result.deletedCount} products removed` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 module.exports = {
   getProducts,
   getProductById,
@@ -238,4 +255,5 @@ module.exports = {
   createProductReview,
   deleteProductReview,
   bulkUploadProducts,
+  deleteProductsBulk,
 };

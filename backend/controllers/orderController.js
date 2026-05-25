@@ -1,54 +1,161 @@
+const mongoose = require('mongoose');
 const Order = require('../models/Order');
+const Coupon = require('../models/Coupon');
+const DiscountRule = require('../models/DiscountRule');
+const Product = require('../models/Product');
 
 // @desc    Create new order
 // @route   POST /api/orders
 // @access  Private
 const createOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
     const {
       orderItems,
       shippingAddress,
       paymentMethod,
-      itemsPrice,
-      taxPrice,
-      shippingPrice,
-      totalPrice,
+      couponCode, // Optional
     } = req.body;
 
-    if (orderItems && orderItems.length === 0) {
+    // 1. Input Validation
+    if (!orderItems || orderItems.length === 0) {
       res.status(400).json({ message: 'No order items' });
+      await session.abortTransaction();
+      session.endSession();
       return;
-    } else {
-      // Check stock before ordering
-      for (const item of orderItems) {
-        const product = await require('../models/Product').findById(item.product);
-        if (!product || product.stock < item.quantity) {
-          return res.status(400).json({ message: `Product ${item.name || product?.name} is out of stock or insufficient quantity` });
+    }
+
+    if (!shippingAddress || !shippingAddress.street || !shippingAddress.city || !shippingAddress.zipCode || !shippingAddress.country) {
+      res.status(400).json({ message: 'Full shipping address is required' });
+      await session.abortTransaction();
+      session.endSession();
+      return;
+    }
+
+    // 2. Process items and calculate prices
+    let subtotal = 0;
+    let totalQuantity = 0;
+    const finalOrderItems = [];
+
+    for (const item of orderItems) {
+      if (!item.product) {
+        res.status(400).json({ message: 'Valid product ID is required for each item' });
+        await session.abortTransaction();
+        session.endSession();
+        return;
+      }
+
+      const product = await Product.findById(item.product).session(session);
+      
+      if (!product) {
+        res.status(400).json({ message: `Product not found: ${item.product}` });
+        await session.abortTransaction();
+        session.endSession();
+        return;
+      }
+
+      // Check stock availability (using 'stock' as per model, but logic as requested)
+      if (product.stock < item.quantity) {
+        res.status(400).json({ 
+          message: `Product ${product.name} out of stock` 
+        });
+        await session.abortTransaction();
+        session.endSession();
+        return;
+      }
+
+      // Reduce stock
+      product.stock -= item.quantity;
+      await product.save({ session });
+      
+      const itemPrice = product.price; // Always use current product price for safety
+      subtotal += itemPrice * item.quantity;
+      totalQuantity += item.quantity;
+
+      finalOrderItems.push({
+        product: product._id,
+        name: product.name,
+        quantity: item.quantity,
+        price: itemPrice,
+        imageUrl: product.imageUrl || ''
+      });
+    }
+
+    // 3. Calculate Bulk Discount (Auto Apply)
+    let bulkDiscount = 0;
+    const activeRules = await DiscountRule.find({ isActive: true }).sort({ minQuantity: -1 }).session(session);
+    const applicableRule = activeRules.find(rule => totalQuantity >= rule.minQuantity);
+    
+    if (applicableRule) {
+      bulkDiscount = (subtotal * applicableRule.discountPercentage) / 100;
+    }
+
+    // Amount after bulk discount
+    const amountAfterBulk = subtotal - bulkDiscount;
+
+    // 4. Handle Coupon
+    let couponDiscount = 0;
+    let appliedCoupon = null;
+    if (couponCode) {
+      appliedCoupon = await Coupon.findOne({ code: couponCode.toUpperCase(), isActive: true }).session(session);
+      if (appliedCoupon) {
+        const now = new Date();
+        const isExpired = now > new Date(appliedCoupon.expiryDate);
+        const limitReached = appliedCoupon.usedCount >= appliedCoupon.usageLimit;
+        const lowCart = amountAfterBulk < appliedCoupon.minOrderAmount;
+
+        if (!isExpired && !limitReached && !lowCart) {
+          if (appliedCoupon.discountType === 'percentage') {
+            couponDiscount = (amountAfterBulk * appliedCoupon.discountValue) / 100;
+            if (appliedCoupon.maxDiscount > 0 && couponDiscount > appliedCoupon.maxDiscount) {
+              couponDiscount = appliedCoupon.maxDiscount;
+            }
+          } else {
+            couponDiscount = appliedCoupon.discountValue;
+          }
+          
+          // Increment used count
+          appliedCoupon.usedCount += 1;
+          await appliedCoupon.save({ session });
         }
       }
-      
-      // Reduce stock
-      for (const item of orderItems) {
-        await require('../models/Product').findByIdAndUpdate(item.product, {
-          $inc: { stock: -item.quantity },
-        });
-      }
-
-      const order = new Order({
-        orderItems,
-        user: req.user._id,
-        shippingAddress,
-        paymentMethod,
-        itemsPrice,
-        taxPrice,
-        shippingPrice,
-        totalPrice,
-      });
-
-      const createdOrder = await order.save();
-      res.status(201).json(createdOrder);
     }
+
+    // Final calculations
+    const shippingPrice = amountAfterBulk > 100 ? 0 : 10;
+    const taxPrice = Number((0.05 * (amountAfterBulk - couponDiscount)).toFixed(2));
+    const totalPrice = Number((amountAfterBulk - couponDiscount + shippingPrice + taxPrice).toFixed(2));
+
+    const order = new Order({
+      orderItems: finalOrderItems,
+      user: req.user._id,
+      shippingAddress,
+      paymentMethod: paymentMethod || 'Mock',
+      itemsPrice: Number(subtotal.toFixed(2)),
+      shippingPrice,
+      taxPrice,
+      couponCode: appliedCoupon ? appliedCoupon.code : '',
+      couponDiscount: Number(couponDiscount.toFixed(2)),
+      bulkDiscount: Number(bulkDiscount.toFixed(2)),
+      totalPrice,
+    });
+
+    const createdOrder = await order.save({ session });
+    
+    await session.commitTransaction();
+    session.endSession();
+    
+    res.status(201).json(createdOrder);
   } catch (error) {
+    if (session) {
+      try {
+        await session.abortTransaction();
+      } catch (abortError) {
+        // Ignore abort errors if transaction wasn't started
+      }
+      session.endSession();
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -58,20 +165,27 @@ const createOrder = async (req, res) => {
 // @access  Private
 const getOrderById = async (req, res) => {
   try {
-    const order = await Order.findById(req.params.id).populate(
-      'user',
-      'name email'
-    );
+    const order = await Order.findById(req.params.id);
 
-    if (order) {
-      // Check if user is admin or the order belongs to user
-      if (req.user.role === 'admin' || order.user._id.toString() === req.user._id.toString()) {
-         res.json(order);
-      } else {
-         res.status(401).json({ message: 'Not authorized to view this order' });
-      }
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    // Safe ownership check
+    const orderUser = order.user;
+    if (!orderUser) {
+      return res.status(404).json({ message: 'Order user not found' });
+    }
+
+    const orderUserId = orderUser._id ? orderUser._id.toString() : orderUser.toString();
+    const isOwner = orderUserId === req.user._id.toString();
+    const isAdmin = req.user.role === 'admin';
+
+    if (isAdmin || isOwner) {
+      const populatedOrder = await Order.findById(req.params.id).populate('user', 'name email');
+      res.json(populatedOrder);
     } else {
-      res.status(404).json({ message: 'Order not found' });
+      res.status(403).json({ message: 'Not authorized to view this order' });
     }
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -85,21 +199,26 @@ const updateOrderToPaid = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
 
-    if (order) {
-      order.isPaid = true;
-      order.paidAt = Date.now();
-      order.paymentResult = {
-        id: req.body.id,
-        status: req.body.status,
-        update_time: req.body.update_time,
-        email_address: req.body.email_address,
-      };
-
-      const updatedOrder = await order.save();
-      res.json(updatedOrder);
-    } else {
-      res.status(404).json({ message: 'Order not found' });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
     }
+
+    const { id, status, update_time, email_address } = req.body;
+
+    // Handle payment failure logic explicitly as requested
+    if (status && typeof status === 'string' && status.toLowerCase() === 'failed') {
+      return res.status(200).json({
+        success: false,
+        message: 'Payment failed'
+      });
+    }
+
+    order.isPaid = true;
+    order.paidAt = Date.now();
+    order.paymentResult = { id, status, update_time, email_address };
+
+    const updatedOrder = await order.save();
+    res.json(updatedOrder);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -110,20 +229,40 @@ const updateOrderToPaid = async (req, res) => {
 // @access  Private/Admin
 const updateOrderStatus = async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status: newStatus } = req.body;
     const order = await Order.findById(req.params.id);
 
-    if (order) {
-      order.status = status;
-      if (status === 'Delivered') {
-        order.isDelivered = true;
-        order.deliveredAt = Date.now();
-      }
-      const updatedOrder = await order.save();
-      res.json(updatedOrder);
-    } else {
-      res.status(404).json({ message: 'Order not found' });
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
     }
+
+    // Workflow validation
+    if (order.status === 'Delivered' || order.status === 'Cancelled') {
+      return res.status(400).json({ 
+        message: `Order is already ${order.status.toLowerCase()} and cannot be changed.` 
+      });
+    }
+
+    const validTransitions = {
+      'Pending': ['Shipped', 'Cancelled'],
+      'Shipped': ['Delivered'],
+    };
+
+    const allowed = validTransitions[order.status] || [];
+    if (!allowed.includes(newStatus)) {
+      return res.status(400).json({ 
+        message: `Cannot change status from ${order.status} to ${newStatus}.` 
+      });
+    }
+
+    order.status = newStatus;
+    if (newStatus === 'Delivered') {
+      order.isDelivered = true;
+      order.deliveredAt = Date.now();
+    }
+    
+    const updatedOrder = await order.save();
+    res.json(updatedOrder);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -135,20 +274,19 @@ const updateOrderStatus = async (req, res) => {
 const getMyOrders = async (req, res) => {
   try {
     const orders = await Order.find({ user: req.user._id });
-    res.json(orders);
+    res.json(orders || []);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc    Get all orders with filter
+// @desc    Get all orders with optional filter
 // @route   GET /api/orders
 // @access  Private/Admin
 const getOrders = async (req, res) => {
   try {
     const statusFilter = req.query.status ? { status: req.query.status } : {};
     
-    // Optional date filter
     let dateFilter = {};
     if (req.query.startDate && req.query.endDate) {
       dateFilter = {
@@ -159,10 +297,12 @@ const getOrders = async (req, res) => {
       };
     }
 
-    const filterObj = { ...statusFilter, ...dateFilter };
+    const orders = await Order.find({
+      ...statusFilter,
+      ...dateFilter
+    }).populate('user', 'id name email');
     
-    const orders = await Order.find(filterObj).populate('user', 'id name');
-    res.json(orders);
+    res.json(orders || []);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

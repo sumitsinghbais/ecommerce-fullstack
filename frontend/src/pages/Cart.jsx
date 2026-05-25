@@ -10,31 +10,27 @@ const Cart = () => {
 
   const navigate = useNavigate();
 
-  const { products, currency, cartItems, removeFromCart} = useContext(ShopContext);
+  const { products, currency, cartItems, updateQuantity } = useContext(ShopContext);
 
   const [cartData, setCartData] = useState([]);
 
   useEffect(() => {
-
-    const tempData = [];
-
-    for (const itemId in cartItems) {
-      for (const size in cartItems[itemId]) {
-
-        if (cartItems[itemId][size] > 0) {
-          tempData.push({
-            _id: itemId,
-            size: size,
-            quantity: cartItems[itemId][size]
-          });
+    if (products.length > 0) {
+      const tempData = [];
+      for (const itemId in cartItems) {
+        for (const size in cartItems[itemId]) {
+          if (cartItems[itemId][size] > 0) {
+            tempData.push({
+              _id: itemId,
+              size: size,
+              quantity: cartItems[itemId][size],
+            });
+          }
         }
-
       }
+      setCartData(tempData);
     }
-
-    setCartData(tempData);
-
-  }, [cartItems]);
+  }, [cartItems, products]);
 
 
   return (
@@ -74,26 +70,32 @@ const Cart = () => {
                     </p>
 
                     <div className="flex items-center gap-5 mt-2">
-                      <p>{currency}{productData.price}</p>
+                      <p className="text-gray-500">{currency}{productData.price}</p>
                       <p className="px-2 sm:px-3 sm:py-1 border bg-slate-50">
                         {item.size}
                       </p>
+                      <p className="font-semibold text-gray-900">{currency}{productData.price * item.quantity}</p>
                     </div>
                   </div>
                 </div>
 
                 {/* Quantity */}
                 <input
-                  onChange={(e) => e.target.value === '' || e.target.value === '0' ? null : addToCart(item._id, item.size)}
-                  className="border max-w-10 sm:max-w-20 px-1 sm:px-2 py-1"
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (value > 0) {
+                      updateQuantity(item._id, item.size, value);
+                    }
+                  }}
+                  className="border max-w-10 sm:max-w-20 px-1 sm:px-2 py-1 text-center"
                   type="number"
                   min={1}
-                  defaultValue={item.quantity}
+                  value={item.quantity}
                 />
 
                 {/* Remove Button */}
                 <img
-                  onClick={() => removeFromCart(item._id, item.size)}
+                  onClick={() => updateQuantity(item._id, item.size, 0)}
                   src={assets.bin_icon}
                   alt="delete"
                   className="w-4 sm:w-5 cursor-pointer"

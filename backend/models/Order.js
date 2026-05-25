@@ -38,6 +38,33 @@ const orderSchema = new mongoose.Schema(
       update_time: { type: String },
       email_address: { type: String },
     },
+    itemsPrice: {
+      type: Number,
+      required: true,
+      default: 0.0,
+    },
+    shippingPrice: {
+      type: Number,
+      required: true,
+      default: 0.0,
+    },
+    taxPrice: {
+      type: Number,
+      required: true,
+      default: 0.0,
+    },
+    couponCode: {
+      type: String,
+      default: '',
+    },
+    couponDiscount: {
+      type: Number,
+      default: 0.0,
+    },
+    bulkDiscount: {
+      type: Number,
+      default: 0.0,
+    },
     totalPrice: {
       type: Number,
       required: true,
@@ -61,6 +88,7 @@ const orderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
+      required: true,
       enum: ['Pending', 'Shipped', 'Delivered', 'Cancelled'],
       default: 'Pending',
     },
@@ -70,5 +98,4 @@ const orderSchema = new mongoose.Schema(
   }
 );
 
-const Order = mongoose.model('Order', orderSchema);
-module.exports = Order;
+module.exports = mongoose.models.Order || mongoose.model('Order', orderSchema);

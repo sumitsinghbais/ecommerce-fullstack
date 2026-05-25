@@ -52,8 +52,57 @@ const PlaceOrder = () => {
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [bulkDiscount, setBulkDiscount] = useState(0);
+  const [rules, setRules] = useState([]);
+
+  // Fetch bulk rules on mount
+  useEffect(() => {
+    const fetchRules = async () => {
+      try {
+        const { data } = await axios.get(`${baseURL}/api/coupons/rules`);
+        setRules(data);
+      } catch (e) { console.error("Error fetching rules"); }
+    };
+    fetchRules();
+  }, []);
+
+  // Calculate Bulk Discount
+  useEffect(() => {
+    let totalQty = 0;
+    for (const itemId in cartItems) {
+      for (const size in cartItems[itemId]) {
+        totalQty += cartItems[itemId][size];
+      }
+    }
+    const applicableRule = rules.sort((a,b) => b.minQuantity - a.minQuantity).find(r => totalQty >= r.minQuantity && r.isActive);
+    if (applicableRule) {
+      setBulkDiscount((getCartAmount() * applicableRule.discountPercentage) / 100);
+    } else {
+      setBulkDiscount(0);
+    }
+  }, [cartItems, rules, getCartAmount]);
+
+  const handleApplyCoupon = async () => {
+    if (!couponCode) return;
+    try {
+      const amountAfterBulk = getCartAmount() - bulkDiscount;
+      const { data } = await axios.post(`${baseURL}/api/coupons/apply`, { 
+        code: couponCode, 
+        cartAmount: amountAfterBulk 
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAppliedCoupon(data);
+      toast.success("Coupon applied!");
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Invalid coupon");
+      setAppliedCoupon(null);
+    }
+  };
+
   const handlePlaceOrder = async () => {
-    // Build order items from cart
     const orderItems = [];
     for (const itemId in cartItems) {
       for (const size in cartItems[itemId]) {
@@ -90,7 +139,7 @@ const PlaceOrder = () => {
         country: formData.country,
       },
       paymentMethod: method === "cod" ? "Cash on Delivery" : method === "stripe" ? "Stripe" : "Razorpay",
-      totalPrice: getCartAmount() + delivery_fee,
+      couponCode: appliedCoupon ? appliedCoupon.code : "",
     };
 
     try {
@@ -100,7 +149,7 @@ const PlaceOrder = () => {
       });
       
       toast.success("Order placed successfully! 🎉");
-      setCartItems({}); // Clear cart
+      setCartItems({});
       navigate("/orders");
     } catch (error) {
       console.error("Order error:", error);
@@ -139,7 +188,65 @@ const PlaceOrder = () => {
       {/* Right Side */}
       <div className="mt-8">
         <div className="mt-8 min-w-80">
-          <CartTotal />
+          <Title text1={"ORDER"} text2={"SUMMARY"} />
+          <div className="flex flex-col gap-2 mt-2 text-sm">
+            <div className="flex justify-between">
+              <p>Subtotal</p>
+              <p>${getCartAmount().toFixed(2)}</p>
+            </div>
+            {bulkDiscount > 0 && (
+              <div className="flex justify-between text-green-600 font-medium">
+                <p>Bulk Discount (Auto)</p>
+                <p>- ${bulkDiscount.toFixed(2)}</p>
+              </div>
+            )}
+            {appliedCoupon && (
+              <div className="flex justify-between text-indigo-600 font-medium">
+                <p>Coupon ({appliedCoupon.code})</p>
+                <p>- ${appliedCoupon.discount.toFixed(2)}</p>
+              </div>
+            )}
+            <hr />
+            <div className="flex justify-between">
+              <p>Shipping Fee</p>
+              <p>${(getCartAmount() - bulkDiscount > 100 ? 0 : 10).toFixed(2)}</p>
+            </div>
+            <div className="flex justify-between">
+              <p>Tax (5%)</p>
+              <p>${(0.05 * (getCartAmount() - bulkDiscount - (appliedCoupon?.discount || 0))).toFixed(2)}</p>
+            </div>
+            <hr />
+            <div className="flex justify-between text-base font-bold">
+              <p>Total</p>
+              <p>${(getCartAmount() - bulkDiscount - (appliedCoupon?.discount || 0) + (getCartAmount() - bulkDiscount > 100 ? 0 : 10) + (0.05 * (getCartAmount() - bulkDiscount - (appliedCoupon?.discount || 0)))).toFixed(2)}</p>
+            </div>
+          </div>
+
+          {/* Coupon Input */}
+          <div className="mt-8">
+            <div className="flex gap-2">
+              <input 
+                type="text" 
+                value={couponCode} 
+                onChange={(e) => setCouponCode(e.target.value)} 
+                placeholder="PROMO CODE"
+                className="border border-gray-300 rounded py-2 px-3 w-full outline-none uppercase text-xs font-bold tracking-widest"
+              />
+              <button 
+                onClick={handleApplyCoupon}
+                className="bg-black text-white px-4 py-2 text-xs font-bold hover:bg-gray-800 transition-colors"
+                disabled={!couponCode || appliedCoupon}
+              >
+                APPLY
+              </button>
+            </div>
+            {appliedCoupon && (
+              <div className="flex items-center justify-between bg-green-50 text-green-700 px-3 py-2 rounded mt-2 text-xs font-medium">
+                 <span>Code <b>{appliedCoupon.code}</b> applied!</span>
+                 <button onClick={() => {setAppliedCoupon(null); setCouponCode("");}} className="hover:text-green-900">&times;</button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Payment Method */}

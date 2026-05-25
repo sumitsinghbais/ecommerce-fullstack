@@ -18,8 +18,8 @@ const ProductItem = ({ id, image, name, price, category }) => {
   // All other sources (Vite assets, Cloudinary URLs, data URIs) pass through as-is
   const finalImageSrc = !rawImage 
     ? "https://via.placeholder.com/300?text=No+Image"
-    : typeof rawImage === 'string' && rawImage.startsWith('/uploads/')
-      ? `${baseURL}${rawImage}` 
+    : typeof rawImage === 'string' && (rawImage.startsWith('/uploads/') || rawImage.startsWith('uploads/'))
+      ? `${baseURL}${rawImage.startsWith('/') ? '' : '/'}${rawImage}` 
       : rawImage;
 
   return (

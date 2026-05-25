@@ -1,0 +1,66 @@
+name: Production-Grade CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+
+    - name: Install Root Dependencies
+      run: npm install
+
+    - name: Install Sub-Project Dependencies
+      run: |
+        npm run install:all
+
+    - name: Run Backend Integration & Unit Tests (80% Coverage Gate)
+      run: |
+        cd backend
+        npm run test:coverage
+      env:
+        JWT_SECRET: ${{ secrets.JWT_SECRET || 'test_secret' }}
+        # Add other necessary env vars here
+
+    - name: Run Frontend Unit & Snapshot Tests
+      run: |
+        cd frontend
+        npm test -- --watchAll=false
+
+    - name: Cypress E2E Testing
+      uses: cypress-io/github-action@v6
+      with:
+        start: npm run start:all
+        wait-on: 'http://localhost:5173'
+        # Browsers to test against
+        browser: chrome
+      env:
+        # Pass necessary environment variables to the servers
+        VITE_API_URL: http://localhost:4000
+        MONGODB_URI: mongodb://localhost:27017/test
+        JWT_SECRET: test_secret_e2e
+        NODEMAILER_PASS: ${{ secrets.NODEMAILER_PASS }}
+
+    - name: Upload Test Artifacts (if fail)
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: cypress-screenshots
+        path: cypress/screenshots

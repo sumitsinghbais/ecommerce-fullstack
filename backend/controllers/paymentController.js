@@ -17,11 +17,15 @@ const createPaymentIntent = async (req, res) => {
       },
     });
 
-    res.send({
+    res.json({
+      success: true,
       clientSecret: paymentIntent.client_secret,
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: error.message || 'Payment processing failed' 
+    });
   }
 };
 
