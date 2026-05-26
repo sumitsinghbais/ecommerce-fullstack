@@ -28,9 +28,12 @@ const app = express();
 
 // Security Middleware
 app.use(helmet());
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
 const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:5173',
+  frontendUrl,
+  frontendUrl.replace(/:80$/, ''), // Strip trailing :80 if present
   'http://localhost:80',
+  'http://localhost',
   'http://localhost:3000'
 ];
 app.use(cors({ 
