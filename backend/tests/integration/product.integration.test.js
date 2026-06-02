@@ -387,6 +387,231 @@ describe('Product Integration Tests', () => {
       expect(res.statusCode).toBe(400);
       expect(res.body.message).toBe('No products provided');
     });
+
+    it('should reject bulk upload with missing products field', async () => {
+      const res = await request(app)
+        .post('/api/products/bulk')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({});
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe('No products provided');
+    });
+  });
+
+  // =====================================================================
+  // FLOW 5.5 — Bulk Delete
+  // =====================================================================
+  describe('Bulk Delete Flow', () => {
+    it('should bulk delete products as admin then verify in DB', async () => {
+      const p1 = await Product.create({ name: 'Bulk Del 1', price: 10, category: 'Men', stock: 5, description: 'desc' });
+      const p2 = await Product.create({ name: 'Bulk Del 2', price: 20, category: 'Women', stock: 10, description: 'desc' });
+      const p3 = await Product.create({ name: 'Bulk Del 3', price: 30, category: 'Kids', stock: 15, description: 'desc' });
+
+      const res = await request(app)
+        .delete('/api/products/bulk')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ids: [p1._id, p2._id] });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.message).toBe('2 products removed');
+
+      const count = await Product.countDocuments({ _id: { $in: [p1._id, p2._id] } });
+      expect(count).toBe(0);
+
+      const dbP3 = await Product.findById(p3._id);
+      expect(dbP3).not.toBeNull();
+    });
+
+    it('should reject bulk delete with missing ids', async () => {
+      const res = await request(app)
+        .delete('/api/products/bulk')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({});
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe('No product IDs provided');
+    });
+
+    it('should reject bulk delete with non-array ids', async () => {
+      const res = await request(app)
+        .delete('/api/products/bulk')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ids: 'not-an-array' });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe('No product IDs provided');
+    });
+
+    it('should reject bulk delete with empty ids array', async () => {
+      const res = await request(app)
+        .delete('/api/products/bulk')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ids: [] });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe('No product IDs provided');
+    });
+  });
+
+  // =====================================================================
+  // FLOW 5.6 — Additional Branch Coverage & Error Simulation
+  // =====================================================================
+  describe('Additional Branch Coverage & Error Simulation', () => {
+    it('should return all products without pagination when limit=0 is specified', async () => {
+      await Product.create({ name: 'Limit 1', price: 10, category: 'Men', stock: 5, description: 'desc' });
+      await Product.create({ name: 'Limit 2', price: 15, category: 'Men', stock: 5, description: 'desc' });
+
+      const res = await request(app).get('/api/products?limit=0');
+      expect(res.statusCode).toBe(200);
+      expect(res.body.products.length).toBeGreaterThanOrEqual(2);
+      expect(res.body.pages).toBe(1);
+    });
+
+    it('should return 404 when deleting a non-existent review', async () => {
+      const { body: product } = await createProduct(adminToken);
+      const res = await request(app)
+        .delete(`/api/products/${product._id}/reviews`)
+        .set('Authorization', `Bearer ${userToken}`);
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body.message).toBe('Review not found or not authorized');
+    });
+
+    it('should return 500 when database errors on getProducts', async () => {
+      const originalFind = Product.find;
+      Product.find = jest.fn().mockReturnValue({
+        sort: jest.fn().mockRejectedValue(new Error('getProducts failure'))
+      });
+
+      const res = await request(app).get('/api/products?limit=0');
+      Product.find = originalFind;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('getProducts failure');
+    });
+
+    it('should return 500 when database errors on getProductById', async () => {
+      const originalFindById = Product.findById;
+      Product.findById = jest.fn().mockRejectedValue(new Error('getProductById failure'));
+
+      const res = await request(app).get('/api/products/507f1f77bcf86cd799439011');
+      Product.findById = originalFindById;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('getProductById failure');
+    });
+
+    it('should return 500 when database errors on createProduct', async () => {
+      const originalSave = Product.prototype.save;
+      Product.prototype.save = jest.fn().mockRejectedValue(new Error('createProduct failure'));
+
+      const res = await request(app)
+        .post('/api/products')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          name: 'DB Error Prod',
+          price: 10,
+          description: 'Desc',
+          category: 'Men',
+          stock: 5
+        });
+
+      Product.prototype.save = originalSave;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('createProduct failure');
+    });
+
+    it('should return 500 when database errors on updateProduct', async () => {
+      const originalFindById = Product.findById;
+      Product.findById = jest.fn().mockRejectedValue(new Error('updateProduct failure'));
+
+      const res = await request(app)
+        .put('/api/products/507f1f77bcf86cd799439011')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Updated Prod' });
+
+      Product.findById = originalFindById;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('updateProduct failure');
+    });
+
+    it('should return 500 when database errors on deleteProduct', async () => {
+      const originalFindById = Product.findById;
+      Product.findById = jest.fn().mockRejectedValue(new Error('deleteProduct failure'));
+
+      const res = await request(app)
+        .delete('/api/products/507f1f77bcf86cd799439011')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      Product.findById = originalFindById;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('deleteProduct failure');
+    });
+
+    it('should return 500 when database errors on createProductReview', async () => {
+      const originalFindById = Product.findById;
+      Product.findById = jest.fn().mockRejectedValue(new Error('createProductReview failure'));
+
+      const res = await request(app)
+        .post('/api/products/507f1f77bcf86cd799439011/reviews')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ rating: 5, comment: 'Comment' });
+
+      Product.findById = originalFindById;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('createProductReview failure');
+    });
+
+    it('should return 500 when database errors on deleteProductReview', async () => {
+      const originalFindById = Product.findById;
+      Product.findById = jest.fn().mockRejectedValue(new Error('deleteProductReview failure'));
+
+      const res = await request(app)
+        .delete('/api/products/507f1f77bcf86cd799439011/reviews')
+        .set('Authorization', `Bearer ${userToken}`);
+
+      Product.findById = originalFindById;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('deleteProductReview failure');
+    });
+
+    it('should return 500 when database errors on bulkUploadProducts', async () => {
+      const originalInsertMany = Product.insertMany;
+      Product.insertMany = jest.fn().mockRejectedValue(new Error('bulkUploadProducts failure'));
+
+      const res = await request(app)
+        .post('/api/products/bulk')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          products: [{ name: 'Bulk', price: 10, category: 'Men', stock: 5 }]
+        });
+
+      Product.insertMany = originalInsertMany;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('bulkUploadProducts failure');
+    });
+
+    it('should return 500 when database errors on deleteProductsBulk', async () => {
+      const originalDeleteMany = Product.deleteMany;
+      Product.deleteMany = jest.fn().mockRejectedValue(new Error('deleteProductsBulk failure'));
+
+      const res = await request(app)
+        .delete('/api/products/bulk')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ ids: ['507f1f77bcf86cd799439011'] });
+
+      Product.deleteMany = originalDeleteMany;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('deleteProductsBulk failure');
+    });
   });
 
   // =====================================================================

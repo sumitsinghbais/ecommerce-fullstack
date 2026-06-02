@@ -4,6 +4,8 @@ const { connectTestDB, disconnectTestDB, clearTestDB } = require('../setup');
 const Product = require('../../models/Product');
 const Order = require('../../models/Order');
 const Cart = require('../../models/Cart');
+const Coupon = require('../../models/Coupon');
+const DiscountRule = require('../../models/DiscountRule');
 const mongoose = require('mongoose');
 const {
   registerUser,
@@ -419,6 +421,383 @@ describe('Order Integration Tests', () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.body.message).toContain('not found');
+    });
+
+    it('should reject order with incomplete shipping address subfields → 400', async () => {
+      const { body: product } = await createProduct(adminToken);
+      const invalidAddresses = [
+        { street: '123' }, // missing city, zipCode, country
+        { street: '123', city: 'C' }, // missing zipCode, country
+        { street: '123', city: 'C', zipCode: '1' }, // missing country
+      ];
+
+      for (const addr of invalidAddresses) {
+        const res = await request(app)
+          .post('/api/orders')
+          .set('Authorization', `Bearer ${userToken}`)
+          .send({
+            orderItems: [{ product: product._id, name: product.name, quantity: 1, price: product.price }],
+            shippingAddress: addr,
+            paymentMethod: 'Mock',
+            totalPrice: product.price,
+          });
+        expect(res.statusCode).toBe(400);
+        expect(res.body.message).toBe('Full shipping address is required');
+      }
+    });
+
+    it('should reject order if order item is missing product ID → 400', async () => {
+      const res = await request(app)
+        .post('/api/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          orderItems: [{ name: 'No ID Item', quantity: 1, price: 10 }],
+          shippingAddress,
+          paymentMethod: 'Mock',
+          totalPrice: 10,
+        });
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toBe('Valid product ID is required for each item');
+    });
+
+    it('should apply bulk discount if quantity matches rule', async () => {
+      const { body: product } = await createProduct(adminToken, { price: 100, stock: 10 });
+      await DiscountRule.create({ minQuantity: 5, discountPercentage: 10 });
+
+      const res = await request(app)
+        .post('/api/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          orderItems: [{ product: product._id, name: product.name, quantity: 5, price: product.price }],
+          shippingAddress,
+          paymentMethod: 'Mock',
+          totalPrice: 500,
+        });
+
+      expect(res.statusCode).toBe(201);
+      // subtotal = 500. bulk discount = 50. amountAfterBulk = 450.
+      // shipping = 0 (since > 100). tax = 0.05 * 450 = 22.5.
+      // total = 450 + 22.5 = 472.5
+      expect(res.body.bulkDiscount).toBe(50);
+      expect(res.body.totalPrice).toBe(472.5);
+    });
+
+    it('should apply percentage coupon with discount capping', async () => {
+      const { body: product } = await createProduct(adminToken, { price: 200, stock: 10 });
+      // Create percentage coupon with max discount capped at $20
+      await Coupon.create({
+        code: 'MAXCAP',
+        discountType: 'percentage',
+        discountValue: 20,
+        maxDiscount: 20,
+        minOrderAmount: 50,
+        expiryDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        usageLimit: 5
+      });
+
+      const res = await request(app)
+        .post('/api/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          orderItems: [{ product: product._id, name: product.name, quantity: 1, price: product.price }],
+          shippingAddress,
+          paymentMethod: 'Mock',
+          couponCode: 'MAXCAP',
+          totalPrice: 200,
+        });
+
+      expect(res.statusCode).toBe(201);
+      // subtotal = 200. amountAfterBulk = 200.
+      // coupon percentage discount = 200 * 0.2 = 40, capped at maxDiscount = 20.
+      // shipping = 0 (since > 100). tax = 0.05 * (200 - 20) = 9.
+      // total = 180 + 9 = 189
+      expect(res.body.couponDiscount).toBe(20);
+      expect(res.body.totalPrice).toBe(189);
+    });
+
+    it('should apply fixed coupon discount', async () => {
+      const { body: product } = await createProduct(adminToken, { price: 50, stock: 10 });
+      await Coupon.create({
+        code: 'FIXEDVAL',
+        discountType: 'fixed',
+        discountValue: 15,
+        minOrderAmount: 20,
+        expiryDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        usageLimit: 5
+      });
+
+      const res = await request(app)
+        .post('/api/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          orderItems: [{ product: product._id, name: product.name, quantity: 1, price: product.price }],
+          shippingAddress,
+          paymentMethod: 'Mock',
+          couponCode: 'FIXEDVAL',
+          totalPrice: 50,
+        });
+
+      expect(res.statusCode).toBe(201);
+      // subtotal = 50. amountAfterBulk = 50. coupon discount = 15.
+      // shipping = 10 (since <= 100). tax = 0.05 * (50 - 15) = 1.75.
+      // total = 35 + 10 + 1.75 = 46.75
+      expect(res.body.couponDiscount).toBe(15);
+      expect(res.body.totalPrice).toBe(46.75);
+    });
+
+    it('should not apply expired coupon', async () => {
+      const { body: product } = await createProduct(adminToken, { price: 50, stock: 10 });
+      await Coupon.create({
+        code: 'EXPIRED',
+        discountType: 'fixed',
+        discountValue: 15,
+        minOrderAmount: 20,
+        expiryDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        usageLimit: 5
+      });
+
+      const res = await request(app)
+        .post('/api/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          orderItems: [{ product: product._id, name: product.name, quantity: 1, price: product.price }],
+          shippingAddress,
+          paymentMethod: 'Mock',
+          couponCode: 'EXPIRED',
+          totalPrice: 50,
+        });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.body.couponDiscount).toBe(0);
+    });
+
+    it('should not apply coupon with reached usage limit', async () => {
+      const { body: product } = await createProduct(adminToken, { price: 50, stock: 10 });
+      await Coupon.create({
+        code: 'LIMITREACHED',
+        discountType: 'fixed',
+        discountValue: 15,
+        minOrderAmount: 20,
+        expiryDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        usageLimit: 5,
+        usedCount: 5
+      });
+
+      const res = await request(app)
+        .post('/api/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          orderItems: [{ product: product._id, name: product.name, quantity: 1, price: product.price }],
+          shippingAddress,
+          paymentMethod: 'Mock',
+          couponCode: 'LIMITREACHED',
+          totalPrice: 50,
+        });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.body.couponDiscount).toBe(0);
+    });
+
+    it('should not apply coupon with order amount below minimum', async () => {
+      const { body: product } = await createProduct(adminToken, { price: 30, stock: 10 });
+      await Coupon.create({
+        code: 'HIGHMIN',
+        discountType: 'fixed',
+        discountValue: 15,
+        minOrderAmount: 100,
+        expiryDate: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        usageLimit: 5
+      });
+
+      const res = await request(app)
+        .post('/api/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          orderItems: [{ product: product._id, name: product.name, quantity: 1, price: product.price }],
+          shippingAddress,
+          paymentMethod: 'Mock',
+          couponCode: 'HIGHMIN',
+          totalPrice: 30,
+        });
+
+      expect(res.statusCode).toBe(201);
+      expect(res.body.couponDiscount).toBe(0);
+    });
+
+    it('should return 404 for order missing user field', async () => {
+      const { body: product } = await createProduct(adminToken);
+      const { body: order } = await createOrder(userToken, [{ product, quantity: 1 }]);
+
+      const originalFindById = Order.findById;
+      // Mock findById to return order without user
+      Order.findById = jest.fn().mockImplementation((id) => {
+        if (id.toString() === order._id.toString()) {
+          return {
+            _id: order._id,
+            user: null,
+          };
+        }
+        return originalFindById(id);
+      });
+
+      const res = await request(app)
+        .get(`/api/orders/${order._id}`)
+        .set('Authorization', `Bearer ${userToken}`);
+
+      Order.findById = originalFindById;
+
+      expect(res.statusCode).toBe(404);
+      expect(res.body.message).toBe('Order user not found');
+    });
+
+    it('should return 400 when updating status of already Delivered or Cancelled order', async () => {
+      const { body: product } = await createProduct(adminToken);
+      const { body: order } = await createOrder(userToken, [{ product, quantity: 1 }]);
+
+      // Mark Delivered first
+      await request(app)
+        .put(`/api/orders/${order._id}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'Shipped' });
+
+      await request(app)
+        .put(`/api/orders/${order._id}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'Delivered' });
+
+      // Try updating status again
+      const res = await request(app)
+        .put(`/api/orders/${order._id}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'Shipped' });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toContain('already delivered');
+    });
+
+    it('should return 400 when updating status with an invalid transition', async () => {
+      const { body: product } = await createProduct(adminToken);
+      const { body: order } = await createOrder(userToken, [{ product, quantity: 1 }]);
+
+      // Pending directly to Delivered is invalid (must be Shipped first)
+      const res = await request(app)
+        .put(`/api/orders/${order._id}/status`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'Delivered' });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.body.message).toContain('Cannot change status from Pending to Delivered');
+    });
+
+    it('should filter orders by status and date range for admin', async () => {
+      const { body: product } = await createProduct(adminToken);
+      await createOrder(userToken, [{ product, quantity: 1 }]);
+
+      const startDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+      const res = await request(app)
+        .get(`/api/orders?status=Pending&startDate=${startDate}&endDate=${endDate}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      expect(res.statusCode).toBe(200);
+      expect(res.body.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should return 500 when database errors on createOrder', async () => {
+      // Mock Order.prototype.save to throw error
+      const originalSave = Order.prototype.save;
+      Order.prototype.save = jest.fn().mockRejectedValue(new Error('createOrder DB error'));
+
+      const { body: product } = await createProduct(adminToken);
+      const res = await request(app)
+        .post('/api/orders')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({
+          orderItems: [{ product: product._id, name: product.name, quantity: 1, price: product.price }],
+          shippingAddress,
+          paymentMethod: 'Mock',
+          totalPrice: product.price,
+        });
+
+      Order.prototype.save = originalSave;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('createOrder DB error');
+    });
+
+    it('should return 500 when database errors on getOrderById', async () => {
+      const originalFindById = Order.findById;
+      Order.findById = jest.fn().mockRejectedValue(new Error('getOrderById DB error'));
+
+      const res = await request(app)
+        .get('/api/orders/507f1f77bcf86cd799439011')
+        .set('Authorization', `Bearer ${userToken}`);
+
+      Order.findById = originalFindById;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('getOrderById DB error');
+    });
+
+    it('should return 500 when database errors on updateOrderToPaid', async () => {
+      const originalFindById = Order.findById;
+      Order.findById = jest.fn().mockRejectedValue(new Error('updateOrderToPaid DB error'));
+
+      const res = await request(app)
+        .put('/api/orders/507f1f77bcf86cd799439011/pay')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send({ id: '123', status: 'COMPLETED' });
+
+      Order.findById = originalFindById;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('updateOrderToPaid DB error');
+    });
+
+    it('should return 500 when database errors on updateOrderStatus', async () => {
+      const originalFindById = Order.findById;
+      Order.findById = jest.fn().mockRejectedValue(new Error('updateOrderStatus DB error'));
+
+      const res = await request(app)
+        .put('/api/orders/507f1f77bcf86cd799439011/status')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ status: 'Shipped' });
+
+      Order.findById = originalFindById;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('updateOrderStatus DB error');
+    });
+
+    it('should return 500 when database errors on getMyOrders', async () => {
+      const originalFind = Order.find;
+      Order.find = jest.fn().mockRejectedValue(new Error('getMyOrders DB error'));
+
+      const res = await request(app)
+        .get('/api/orders/myorders')
+        .set('Authorization', `Bearer ${userToken}`);
+
+      Order.find = originalFind;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('getMyOrders DB error');
+    });
+
+    it('should return 500 when database errors on getOrders', async () => {
+      const originalFind = Order.find;
+      Order.find = jest.fn().mockReturnValue({
+        populate: jest.fn().mockRejectedValue(new Error('getOrders DB error'))
+      });
+
+      const res = await request(app)
+        .get('/api/orders')
+        .set('Authorization', `Bearer ${adminToken}`);
+
+      Order.find = originalFind;
+
+      expect(res.statusCode).toBe(500);
+      expect(res.body.message).toBe('getOrders DB error');
     });
   });
 
